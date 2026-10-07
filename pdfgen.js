@@ -52,45 +52,62 @@ function imagesPDF(items) {
   return pdf.build();
 }
 
-/* ---------- Printed answer key: vector copy of the sheet at the scanner's template positions ---------- */
-const CODE_BARS = [[442.4, 2.8], [449.0, 2.8], [455.7, 2.8], [462.3, 2.8], [473.1, 7.0], [483.9, 2.8], [490.6, 7.0], [505.6, 2.8], [512.2, 7.0], [527.3, 2.8], [533.9, 7.0], [544.7, 7.0], [555.5, 2.8]];
-function keyPage(exam, F) {
+/* ---------- Printed sheets (blank and answer keys) at the scanner's template positions ---------- */
+// No code bar: the scanner only uses the six large squares and the three small centre squares.
+// Draws one sheet at the scanner's template positions. opts: { fill(n) -> letters to fill for question n,
+// form (letter to fill in the form box), name (text in the name box), header [lines], footer (text) }
+function sheetPage(opts) {
   const Y = y => 792 - y, out = [];
   const circle = (x, y, r) => { const k = 0.5523 * r, yy = Y(y);
     return `${f3(x + r)} ${f3(yy)} m ${f3(x + r)} ${f3(yy + k)} ${f3(x + k)} ${f3(yy + r)} ${f3(x)} ${f3(yy + r)} c ${f3(x - k)} ${f3(yy + r)} ${f3(x - r)} ${f3(yy + k)} ${f3(x - r)} ${f3(yy)} c ${f3(x - r)} ${f3(yy - k)} ${f3(x - k)} ${f3(yy - r)} ${f3(x)} ${f3(yy - r)} c ${f3(x + k)} ${f3(yy - r)} ${f3(x + r)} ${f3(yy - k)} ${f3(x + r)} ${f3(yy)} c `; };
   const text = (s, x, y, size, bold, align) => {
-    const w = String(s).length * size * 0.55, xx = align === "c" ? x - w / 2 : align === "r" ? x - w : x;
+    const w = String(s).length * size * 0.5, xx = align === "c" ? x - w / 2 : align === "r" ? x - w : x;
     out.push(`BT /${bold ? "F2" : "F1"} ${size} Tf ${f3(xx)} ${f3(Y(y))} Td (${pdfText(s)}) Tj ET`);
   };
   const rect = (x, y, w, h, fill) => out.push(`${f3(x)} ${f3(Y(y + h))} ${f3(w)} ${f3(h)} re ${fill ? "f" : "S"}`);
   out.push("0 g 0 G");
+  (opts.header || []).forEach((line, i) => text(line, 150, 118 + i * 12.5, i ? 8.5 : 11, !i));
   for (const k in TPL.M) { const [x, y] = TPL.M[k]; rect(x - 5.55, y - 5.55, 11.1, 11.1, true); }
   for (const [x, y] of TPL.small) rect(x - 3.9, y - 3.9, 7.8, 7.8, true);
-  for (const [y, h] of CODE_BARS) rect(150, y, 11.1, h, true);
-  // name box with the key label
   text("Name", 172.2, 179, 10); out.push("0.8 w"); rect(172.2, 182.6, 144, 23, false);
-  text(`KEY - ${exam.quizName} - Form ${F}`, 176, 197.5, 8.5, true);
-  text(`Exam Form`, 299.7, 575, 8, false, "c");
+  if (opts.name) text(opts.name, 176, 197.5, 8.5, true);
+  text("Exam Form", 299.7, 575, 8, false, "c");
   const bubble = (x, y, label, filled) => {
     if (filled) out.push(`0 g ${circle(x, y, 5.6)}f`);
     else { out.push(`0.6 G 0.5 w ${circle(x, y, 6)}S 0.6 g`); text(label, x, y + 2.1, 6, false, "c"); out.push("0 g 0 G"); }
   };
-  out.push("0.6 g");
-  // answers
   for (let n = 1; n <= 25; n++) {
-    const row = TPL.q[n - 1], key = formKey(exam, F, n);
-    out.push("0 g"); text(String(n), row[0][0] - 8.5, row[0][1] + 3.2, 9, false, "r"); out.push("0.6 g");
-    row.forEach(([x, y], j) => bubble(x, y, LETTERS[j], key.includes(LETTERS[j])));
+    const row = TPL.q[n - 1], f = opts.fill ? opts.fill(n) : "";
+    out.push("0 g"); text(String(n), row[0][0] - 8.5, row[0][1] + 3.2, 9, false, "r");
+    row.forEach(([x, y], j) => bubble(x, y, LETTERS[j], f.includes(LETTERS[j])));
   }
-  // student ID grid (left blank on a key) and form box
   out.push("0 g"); text("Student ID", 333.7, 395, 8); out.push("0.7 G 0.5 w"); rect(333.7, 398.3, 105, 200, false); rect(333.7, 398.3, 105, 20, false);
   for (let c = 1; c < 7; c++) out.push(`${f3(333.7 + 15 * c)} ${f3(Y(398.3))} m ${f3(333.7 + 15 * c)} ${f3(Y(418.3))} l S`);
-  out.push("0.6 g");
   TPL.id.forEach(col => col.forEach(([x, y], d) => bubble(x, y, String(d), false)));
-  out.push("0.7 G"); rect(275.7, 578.3, 48, 20, false); out.push("0.6 g");
-  TPL.form.forEach(([x, y], j) => bubble(x, y, "ABC"[j], "ABC"[j] === F));
-  out.push("0 g");
-  text(`${exam.quizName} (${exam.quizClass}) - answer key, Form ${F}. Printed ${stamp()}.`, 150, 640, 8);
+  out.push("0.7 G 0.5 w"); rect(275.7, 578.3, 48, 20, false);
+  TPL.form.forEach(([x, y], j) => bubble(x, y, "ABC"[j], "ABC"[j] === opts.form));
+  out.push("0 g 0 G");
+  if (opts.footer) text(opts.footer, 150, 640, 8);
   return out.join("\n") + "\n";
+}
+function keyPage(exam, F) {
+  return sheetPage({ fill: n => formKey(exam, F, n), form: F, name: `KEY - ${exam.quizName} - Form ${F}`,
+    footer: `${exam.quizName} (${exam.quizClass}) - answer key, Form ${F}. Printed ${stamp()}.` });
+}
+// Blank answer sheet: same layout as the ZipGrade 0065 sheet (so both scan the same way), no ZipGrade branding.
+function blankSheetPage() {
+  return sheetPage({
+    header: ["Exam Scanner answer sheet - 25 questions", "Use a No. 2 pencil. Fill each bubble completely; erase changes cleanly.",
+      "Bubble your 7-digit Student ID and your exam form (A, B or C).", "Do not write on or near the black squares."],
+  });
+}
+function blankSheetsPDF() { const pdf = new PDF(); pdf.page(blankSheetPage()); return pdf.build(); }
+// Two blank sheets side by side on a landscape letter page, full size, with a dashed cut line.
+// The sheet's printed area (x 140-472, y 108-610 in page points) is centred in each half.
+function blankSheets2upPDF() {
+  const one = blankSheetPage(), ty = 306 - (792 - (108 + 610) / 2);
+  const half = cx => `q 1 0 0 1 ${f3(cx - 306)} ${f3(ty)} cm\n${one}Q\n`;
+  const cut = "q 0.6 G 0.5 w [4 4] 0 d 396 18 m 396 594 l S Q\n";
+  const pdf = new PDF(); pdf.page(half(198) + half(594) + cut, 792, 612); return pdf.build();
 }
 function keysPDF(exam, forms) { const pdf = new PDF(); for (const F of forms) pdf.page(keyPage(exam, F)); return pdf.build(); }

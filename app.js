@@ -148,6 +148,9 @@ function homeHTML() {
       ${codes.length ? `<label class="inline">Semester <select data-change="filter"><option value="">All</option>${codes.map(c => `<option ${c === R.filter ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>` : ""}</div>
     <div class="list">${rows}</div>
     <h2>Rosters</h2><div class="list">${rosters}</div>
+    <h2>Answer sheets</h2>
+    <p class="note">A printable blank answer sheet, one per page or two per page (landscape; cut down the middle). It has the same layout as the ZipGrade sheet, so either one scans.</p>
+    <div class="actions"><button data-act="blankSheet">Blank answer sheet (PDF)</button><button data-act="blankSheet2">2 per page (PDF)</button></div>
     <h2>Backup</h2>
     <p class="note">A backup file holds everything in this app: rosters, exams, papers, scanned images, fixes and change logs.</p>
     <div class="actions"><button data-act="backup">Back up to a file</button><button data-act="restore">Restore from a backup</button></div>
@@ -273,7 +276,12 @@ async function openPaper(id) {
     if (i.type === "marks") {
       const a = p.answers[i.q - 1];
       btns = `<button class="small" data-act="resolveQ" data-id="${p.id}" data-q="${i.q}">${!a ? "Confirm blank (BNK)" : a.length > 1 ? "Keep double mark (scored wrong)" : `Confirm ${a}`}</button>`;
-    } else if (i.type === "form") btns = "ABC".split("").map(F => `<button class="small" data-act="setForm" data-id="${p.id}" data-form="${F}">Form ${F}</button>`).join("");
+    } else if (i.type === "form") {
+      // Suggest the form whose key fits the answers best.
+      const fits = "ABC".split("").map(F => ({ F, c: gradeWith(exam, F, p.answers).correctCount })), top = Math.max(...fits.map(f => f.c));
+      const likely = fits.filter(f => f.c === top).length === 1 ? fits.find(f => f.c === top).F : null;
+      btns = fits.map(f => `<button class="small ${f.F === likely ? "primary" : ""}" data-act="setForm" data-id="${p.id}" data-form="${f.F}">Form ${f.F} · ${f.c}/25${f.F === likely ? " (likely)" : ""}</button>`).join("");
+    }
     else if (i.type === "wrongform") btns = `<button class="small" data-act="setForm" data-id="${p.id}" data-form="${i.other}">Switch to Form ${i.other}</button><button class="small" data-act="formOk" data-id="${p.id}">Form ${p.form} is correct</button>`;
     else if (i.type === "dup") btns = `<button class="small" data-act="useThis" data-id="${p.id}">Use this paper</button>`;
     else if (i.type === "id" || i.type === "roster") btns = assign;
@@ -656,6 +664,8 @@ const A = {
   applyKey(d) { applyKey(S.exams.get(R.id), +d.n, d.letters, d.drop === "1"); },
   keyCheck() { scanMode = { type: "keycheck" }; keyCheck = null; R.tab = "scan"; render(); toast("Scan the filled-in key sheet."); },
   clearCheck() { keyCheck = null; render(); },
+  blankSheet2() { offerFiles([new File([blankSheets2upPDF()], "Exam Scanner Answer Sheets - 2 per page.pdf", { type: "application/pdf" })], "Answer sheets ready"); },
+  blankSheet() { offerFiles([new File([blankSheetsPDF()], "Exam Scanner Answer Sheet.pdf", { type: "application/pdf" })], "Answer sheet ready"); },
   printKeys() { const exam = S.exams.get(R.id); offerFiles([new File([keysPDF(exam, ["A", "B", "C"])], fileName(exam, "Answer Keys", "pdf"), { type: "application/pdf" })], "Answer keys ready"); },
   async export(d) {
     const exam = S.exams.get(R.id), btn = document.querySelector(`[data-what="${d.what}"]`);

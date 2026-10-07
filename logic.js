@@ -4,6 +4,7 @@
 
 const POINTS = 2, NQ = 25, POSSIBLE = POINTS * NQ;
 const ROUND = f => (f === "C" ? "C" : "AB");
+const WRONG_FORM_MARGIN = 3;   // flag "possible wrong form" when another form's key gets this many more questions right
 
 /* ---------- CSV ---------- */
 function parseCSV(text) {
@@ -155,18 +156,21 @@ function reviewExam(exam, papers, roster) {
     if (p.sid.includes("?")) iss.push({ type: "id", text: `Student ID unreadable (${p.sid})`, blocking: true });
     else if (!idx.has(p.sid)) iss.push({ type: "roster", text: `ID ${p.sid} is not on the roster — left out of the grade CSV`, blocking: false });
     if (!p.form) iss.push({ type: "form", text: p.formFlag === "multiple" ? "Two exam forms marked" : "No exam form marked", blocking: true });
+    // Answer flags don't need the form, so they show up at the same time as a missing-form flag.
+    // (Without a form, a double mark can't be checked against a two-answer key yet; that flag clears
+    // by itself once the form is chosen if the marks match the key.)
+    for (let n = 1; n <= NQ; n++) {
+      if (p.ok[n - 1]) continue;
+      const a = p.answers[n - 1], fl = p.ansFlags[n - 1];
+      if (!a) iss.push({ type: "marks", q: n, text: `Q${n} blank`, blocking: true });
+      else if (a.length > 1 && (!p.form || a !== formKey(exam, p.form, n))) iss.push({ type: "marks", q: n, text: `Q${n} multiple marks (${a})`, blocking: true });
+      else if (fl === "faint") iss.push({ type: "marks", q: n, text: `Q${n} faint mark (${a})`, blocking: true });
+    }
     if (p.form) {
-      for (let n = 1; n <= NQ; n++) {
-        if (p.ok[n - 1]) continue;
-        const a = p.answers[n - 1], fl = p.ansFlags[n - 1];
-        if (!a) iss.push({ type: "marks", q: n, text: `Q${n} blank`, blocking: true });
-        else if (a.length > 1 && a !== formKey(exam, p.form, n)) iss.push({ type: "marks", q: n, text: `Q${n} multiple marks (${a})`, blocking: true });
-        else if (fl === "faint") iss.push({ type: "marks", q: n, text: `Q${n} faint mark (${a})`, blocking: true });
-      }
       if (!p.formOk) {
         const own = gradeWith(exam, p.form, p.answers).correctCount;
         let best = null;
-        for (const F of "ABC") if (F !== p.form) { const c = gradeWith(exam, F, p.answers).correctCount; if (c >= own + 6 && (!best || c > best.c)) best = { F, c }; }
+        for (const F of "ABC") if (F !== p.form) { const c = gradeWith(exam, F, p.answers).correctCount; if (c >= own + WRONG_FORM_MARGIN && (!best || c > best.c)) best = { F, c }; }
         if (best) iss.push({ type: "wrongform", text: `Possible wrong form: ${own}/25 on Form ${p.form}, ${best.c}/25 on Form ${best.F}`, blocking: true, other: best.F });
       }
       const g = groups.get(p.sid + "|" + ROUND(p.form));
