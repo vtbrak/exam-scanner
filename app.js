@@ -1,6 +1,6 @@
 /* Exam Scanner — storage, screens and actions. Depends on engine.js, logic.js, pdfgen.js. */
 "use strict";
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 
 /* ============================================================
    Storage (IndexedDB, on this phone only)
