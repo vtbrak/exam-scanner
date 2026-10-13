@@ -139,7 +139,8 @@ function grade(exam, p) { return p.form ? gradeWith(exam, p.form, p.answers) : n
 function rosterIndex(roster) { const m = new Map(); (roster?.students || []).forEach(s => m.set(s.id, s)); return m; }
 
 /* ---------- Review flags ---------- */
-// Returns { byPaper: Map(paperId -> issues[]), missing: [{student, round}], blocking: count }
+// Returns { byPaper: Map(paperId -> issues[]), missing: [{student, round}], blocking: count of scanning issues }
+// Missing papers don't block export; they are acknowledged when exporting.
 function reviewExam(exam, papers, roster) {
   const idx = rosterIndex(roster), byPaper = new Map();
   const active = papers.filter(p => !p.excluded);
@@ -179,13 +180,16 @@ function reviewExam(exam, papers, roster) {
     blocking += iss.filter(i => i.blocking).length;
     byPaper.set(p.id, iss);
   }
-  const missing = [];
+  // missingAll: every roster student with no paper for a round (stays listed after acknowledging/export);
+  // missing: the ones not yet acknowledged (asked about at export).
+  const missing = [], missingAll = [];
   if (roster) for (const s of roster.students) for (const r of ["AB", "C"]) {
-    if (groups.has(s.id + "|" + r) || exam.ack?.[s.id + "|" + r]) continue;
-    missing.push({ student: s, round: r });
+    if (groups.has(s.id + "|" + r)) continue;
+    const acked = !!exam.ack?.[s.id + "|" + r];
+    missingAll.push({ student: s, round: r, acked });
+    if (!acked) missing.push({ student: s, round: r });
   }
-  blocking += missing.length;
-  return { byPaper, missing, blocking };
+  return { byPaper, missing, missingAll, blocking };
 }
 
 /* ---------- Dates ---------- */

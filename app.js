@@ -130,6 +130,7 @@ function homeHTML() {
       <div class="row-main"><div class="row-title">${esc(e.quizName)}</div>
       <div class="row-sub">${esc(e.quizClass)} · ${papers.length} papers · exported ${fmtDate(e.lastExport)}</div></div>
       <div class="row-side">${rv.blocking ? `<span class="chip warn">${rv.blocking} to review</span>` : `<span class="chip ok">Ready</span>`}
+      ${rv.missingAll.length ? `<span class="chip">${rv.missingAll.length} missing</span>` : ""}
       ${e.changedSinceExport ? `<span class="chip">Changed since export</span>` : ""}</div></button>`;
   }).join("") || `<p class="empty">No exams yet. Import the mapping file from Exam Maker to create one.</p>`;
   const rosters = [...S.rosters.values()].sort((a, b) => b.code.localeCompare(a.code)).map(r =>
@@ -234,26 +235,42 @@ async function handleCapture(r, source = "camera") {
 }
 
 /* ---------- Review tab ---------- */
+// Three sections: 1. A/B missing, 2. C missing, 3. Scanning review; then the full paper list.
+function missingSection(exam, rv, round, title) {
+  const all = rv.missingAll.filter(m => m.round === round), open = all.filter(m => !m.acked).length;
+  let h = `<h2>${title} <span class="muted">${all.length}</span></h2>`;
+  if (!all.length) return h + `<p class="note">Every roster student has a ${round === "C" ? "Form C" : "Form A or B"} paper.</p>`;
+  h += `<p class="note">Roster students with no ${round === "C" ? "Form C" : "Form A or B"} paper turned in. They stay listed here, even after export, until a paper is scanned for them.
+    ${open ? `${open} not yet acknowledged: you'll be asked to acknowledge them when you export.` : "All acknowledged (exported without a paper)."}</p>
+    ${open ? `<div class="actions"><button data-act="ackAll" data-round="${round}">Acknowledge all ${open}</button></div>` : ""}
+    <details ${all.length <= 10 ? "open" : ""}><summary>Show ${all.length} student${all.length === 1 ? "" : "s"}</summary><div class="list">` +
+    all.map(m => `<div class="row static"><div class="row-main"><div class="row-title">${esc(m.student.last)}, ${esc(m.student.first)}</div>
+      <div class="row-sub">${m.student.id}</div></div>
+      <div class="row-side">${m.acked ? `<span class="chip">No paper · acknowledged</span>` : `<button class="small" data-act="ack" data-sid="${m.student.id}" data-round="${m.round}">Acknowledge</button>`}</div></div>`).join("") + `</div></details>`;
+  return h;
+}
 function reviewHTML(exam, papers, rv) {
   const groups = [["id", "Student ID"], ["form", "Exam form"], ["marks", "Marks (blank, faint, multiple)"], ["dup", "Duplicates"],
     ["wrongform", "Possible wrong form"], ["roster", "Not on roster (left out of the grade CSV)"]];
   const byLast = byStudent(exam);
-  let html = `<div class="summary">${papers.length} papers · ${rv.blocking ? `<b class="warn-text">${rv.blocking} item${rv.blocking === 1 ? "" : "s"} to review before export</b>` : `<b class="ok-text">Nothing blocking export</b>`}</div>`;
-  if (papers.some(p => (rv.byPaper.get(p.id) || []).length)) html += `<div class="actions"><button class="primary" data-act="stepThrough">Step through flagged papers</button></div>`;
-  for (const [type, title] of groups) {
-    const list = papers.filter(p => (rv.byPaper.get(p.id) || []).some(i => i.type === type)).sort(byLast);
-    if (!list.length) continue;
-    html += `<h2>${title} <span class="muted">${list.length}</span></h2><div class="list">` + list.map(p =>
-      `<button class="row" data-act="openPaper" data-id="${p.id}"><div class="row-main"><div class="row-title">${studentLabel(exam, p)}</div>
-       <div class="row-sub">${rv.byPaper.get(p.id).filter(i => i.type === type).map(i => esc(i.text)).join(" · ")}</div></div></button>`).join("") + `</div>`;
-  }
-  if (rv.missing.length) {
-    html += `<h2>Missing papers <span class="muted">${rv.missing.length}</span></h2>
-      <p class="note">Roster students with no paper yet. Acknowledge (e.g. absent) to allow export; they simply get no row for that form.</p>
-      <div class="actions"><button data-act="ackAll">Acknowledge all ${rv.missing.length}</button></div><div class="list">` +
-      rv.missing.map(m => `<div class="row static"><div class="row-main"><div class="row-title">${esc(m.student.last)}, ${esc(m.student.first)}</div>
-       <div class="row-sub">No ${m.round === "C" ? "Form C" : "Form A/B"} paper</div></div>
-       <div class="row-side"><button class="small" data-act="ack" data-sid="${m.student.id}" data-round="${m.round}">Acknowledge</button></div></div>`).join("") + `</div>`;
+  const ab = rv.missingAll.filter(m => m.round === "AB").length, c = rv.missingAll.length - ab;
+  const flagged = papers.filter(p => (rv.byPaper.get(p.id) || []).length);
+  let html = `<div class="summary">${papers.length} papers · A/B missing ${ab} · C missing ${c}<br>
+    ${rv.blocking ? `<b class="warn-text">${rv.blocking} scanning item${rv.blocking === 1 ? "" : "s"} to fix before export</b>` : `<b class="ok-text">No scanning problems blocking export</b>`}</div>`;
+  html += missingSection(exam, rv, "AB", "1. A/B missing");
+  html += missingSection(exam, rv, "C", "2. C missing");
+  html += `<h2>3. Scanning review <span class="muted">${flagged.length}</span></h2>`;
+  if (!flagged.length) html += `<p class="note">No scanned papers need review.</p>`;
+  else {
+    html += `<p class="note">Problems found when reading the sheets. These must be fixed before the grade file can be made (papers not on the roster are only left out).</p>
+      <div class="actions"><button class="primary" data-act="stepThrough">Step through flagged papers</button></div>`;
+    for (const [type, title] of groups) {
+      const list = papers.filter(p => (rv.byPaper.get(p.id) || []).some(i => i.type === type)).sort(byLast);
+      if (!list.length) continue;
+      html += `<h3>${title} <span class="muted">${list.length}</span></h3><div class="list">` + list.map(p =>
+        `<button class="row" data-act="openPaper" data-id="${p.id}"><div class="row-main"><div class="row-title">${studentLabel(exam, p)}</div>
+         <div class="row-sub">${rv.byPaper.get(p.id).filter(i => i.type === type).map(i => esc(i.text)).join(" · ")}</div></div></button>`).join("") + `</div>`;
+    }
   }
   html += `<h2>All papers <span class="muted">${papers.length}</span></h2><div class="list">` + ([...papers].sort(byLast).map(p => {
     const iss = rv.byPaper.get(p.id) || [];
@@ -428,7 +445,8 @@ function exportHTML(exam, papers, rv) {
   const blocked = rv.blocking > 0, n = exportPapers(exam, papers, rosterFor(exam)).length;
   return `
     <div class="summary">${blocked ? `<b class="warn-text">${rv.blocking} item${rv.blocking === 1 ? " needs" : "s need"} review</b> before the grade and item analysis files can be made. <button class="link" data-act="tab" data-tab="review">Go to Review</button>`
-      : `<b class="ok-text">Ready.</b> ${n} rows will be exported.`}<br>Last export: ${fmtDate(exam.lastExport)}${exam.changedSinceExport ? " · <b>changed since</b>" : ""}</div>
+      : `<b class="ok-text">Ready.</b> ${n} rows will be exported.`}
+      ${rv.missing.length ? `<br>${rv.missing.filter(m => m.round === "AB").length} A/B and ${rv.missing.filter(m => m.round === "C").length} C papers are missing. You'll be asked to acknowledge them when you export.` : ""}<br>Last export: ${fmtDate(exam.lastExport)}${exam.changedSinceExport ? " · <b>changed since</b>" : ""}</div>
     <div class="actions col">
       <button class="primary" data-act="export" data-what="all" ${blocked ? "disabled" : ""}>Export all</button>
       <button data-act="export" data-what="grades" ${blocked ? "disabled" : ""}>Grades CSV</button>
@@ -640,12 +658,15 @@ const A = {
     exam.ack = exam.ack || {}; exam.ack[d.sid + "|" + d.round] = true;
     await addLog(exam, { action: "MissingAcknowledged", sid: s.id, last: s.last, first: s.first, form: d.round === "C" ? "C" : "A/B", old: "missing", new: "acknowledged" }); render();
   },
-  async ackAll() {
+  async ackAll(d) {
     const exam = S.exams.get(R.id), rv = reviewExam(exam, examPapers(exam), rosterFor(exam));
-    if (!confirm(`Acknowledge all ${rv.missing.length} missing papers? Those students get no row for that form.`)) return;
-    exam.ack = exam.ack || {};
-    for (const m of rv.missing) { exam.ack[m.student.id + "|" + m.round] = true; await addLog(exam, { action: "MissingAcknowledged", sid: m.student.id, last: m.student.last, first: m.student.first, form: m.round === "C" ? "C" : "A/B", old: "missing", new: "acknowledged" }); }
-    render();
+    const list = rv.missing.filter(m => !d.round || m.round === d.round), what = d.round === "C" ? "Form C" : d.round === "AB" ? "Form A/B" : "";
+    if (!confirm(`Acknowledge all ${list.length} missing ${what} papers? Those students get no row for that form.`)) return;
+    await ackMissing(exam, list); render();
+  },
+  async exportAck(d) {
+    const exam = S.exams.get(R.id), rv = reviewExam(exam, examPapers(exam), rosterFor(exam));
+    await ackMissing(exam, rv.missing); closeModal(); await A.export({ what: d.what, acked: true });
   },
   rescan(d) { scanMode = { type: "rescan", paperId: d.id }; closeModal(); R.tab = "scan"; render(); toast("Scan the replacement sheet."); },
   async deletePaper(d) {
@@ -669,6 +690,19 @@ const A = {
   printKeys() { const exam = S.exams.get(R.id); offerFiles([new File([keysPDF(exam, ["A", "B", "C"])], fileName(exam, "Answer Keys", "pdf"), { type: "application/pdf" })], "Answer keys ready"); },
   async export(d) {
     const exam = S.exams.get(R.id), btn = document.querySelector(`[data-what="${d.what}"]`);
+    if (["all", "grades", "items"].includes(d.what) && !d.acked) {
+      const rv = reviewExam(exam, examPapers(exam), rosterFor(exam));
+      if (rv.missing.length) {
+        const ab = rv.missing.filter(m => m.round === "AB"), c = rv.missing.filter(m => m.round === "C");
+        const names = l => l.slice(0, 12).map(m => `${esc(m.student.last)}, ${esc(m.student.first)}`).join("; ") + (l.length > 12 ? `; and ${l.length - 12} more` : "");
+        return openModal(`<h2>Missing papers</h2>
+          <p>These roster students have no paper. They will get no row in the grade file for that form.</p>
+          ${ab.length ? `<p><b>A/B missing: ${ab.length}</b><br><span class="note">${names(ab)}</span></p>` : ""}
+          ${c.length ? `<p><b>C missing: ${c.length}</b><br><span class="note">${names(c)}</span></p>` : ""}
+          <div class="actions"><button class="primary" data-act="exportAck" data-what="${d.what}">Acknowledge ${rv.missing.length} missing and export</button>
+          <button data-act="closeModal">Cancel</button></div>`);
+      }
+    }
     if (btn) { btn.disabled = true; btn.textContent = "Preparing…"; }
     try { offerFiles(await buildExport(exam, d.what)); } catch (e) { console.error(e); toast("Export failed: " + esc(e.message), true); }
     render();
@@ -696,6 +730,14 @@ const A = {
     await DB.del("exams", exam.id); S.exams.delete(exam.id); R = { view: "home", filter: "" }; render(); toast("Exam deleted.");
   },
 };
+async function ackMissing(exam, list) {
+  exam.ack = exam.ack || {};
+  for (const m of list) {
+    exam.ack[m.student.id + "|" + m.round] = true;
+    await addLog(exam, { action: "MissingAcknowledged", sid: m.student.id, last: m.student.last, first: m.student.first, form: m.round === "C" ? "C" : "A/B", old: "missing", new: "acknowledged" });
+  }
+  await saveExam(exam);
+}
 async function afterFix(p) { if (stepping) { const ids = stepList(S.exams.get(p.examId)); if (!ids.includes(p.id) && ids.length) { await openPaper(ids[0]); render(); return; } } await openPaper(p.id); render(); }
 
 document.addEventListener("click", e => {
